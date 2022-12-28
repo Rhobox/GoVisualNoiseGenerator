@@ -9,16 +9,17 @@ import (
 )
 
 var (
-	circleColour           = color.RGBA{200, 12, 12, 255}
-	isCycling              = false
-	stopCycling            = make(chan bool)
-	cyclePeriod      int32 = 100
-	cyclePeriodInput int32 = 100
-	seed                   = rand.NewSource(time.Now().UnixNano())
-	randomGenerator        = rand.New(seed)
+	circleColour          = color.RGBA{200, 12, 12, 255}
+	isCycling             = false
+	cycleIntervals        = make(chan int32)
+	cyclePeriod     int32 = 100
+	seed                  = rand.NewSource(time.Now().UnixNano())
+	randomGenerator       = rand.New(seed)
 )
 
 type CircleButtonWidget struct {
+	g.Widget
+
 	id      string
 	clicked func()
 }
@@ -49,39 +50,42 @@ func (c *CircleButtonWidget) Build() {
 }
 
 func setCyclePeriod() {
-	cyclePeriod = cyclePeriodInput
-	g.Update()
+	cycleIntervals <- cyclePeriod
 }
 
 func onCircleClick() {
-	if isCycling {
-		stopCycling <- false
-		isCycling = false
-	} else {
-		go cycleCircleColour()
-		isCycling = true
-	}
+	isCycling = !isCycling
 }
 
 func cycleCircleColour() {
-	ticker := time.NewTicker(time.Duration(cyclePeriod) * time.Millisecond)
+	interval := <-cycleIntervals
+	ticker := time.NewTicker(time.Duration(interval) * time.Millisecond)
 	for {
 		select {
-		case <-stopCycling:
+		case i := <-cycleIntervals:
 			ticker.Stop()
-			return
+			ticker = time.NewTicker(time.Duration(i) * time.Millisecond)
 
 		case <-ticker.C:
-			circleColour = color.RGBA{uint8(randomGenerator.Intn(255)), uint8(randomGenerator.Intn(255)), uint8(randomGenerator.Intn(255)), uint8(randomGenerator.Intn(120) + 135)}
+			if !isCycling {
+				continue
+			}
+
+			circleColour = color.RGBA{
+				uint8(randomGenerator.Intn(255)),
+				uint8(randomGenerator.Intn(255)),
+				uint8(randomGenerator.Intn(255)),
+				uint8(randomGenerator.Intn(120) + 135),
+			}
 			g.Update()
 		}
 	}
 }
 
-func loop() {
+func uiLoop() {
 	g.SingleWindow().Layout(
 		g.Row(
-			g.InputInt(&cyclePeriodInput).Label("Colour cycle period: "),
+			g.InputInt(&cyclePeriod).Label("Colour cycle period: "),
 		),
 		g.Row(
 			g.Button("Update").OnClick(setCyclePeriod),
@@ -93,5 +97,8 @@ func loop() {
 func main() {
 	flags := g.MasterWindowFlagsFloating + g.MasterWindowFlagsNotResizable + g.MasterWindowFlagsFrameless + g.MasterWindowFlagsTransparent
 	wnd := g.NewMasterWindow("Visual Distraction", 400, 300, flags)
-	wnd.Run(loop)
+
+	go cycleCircleColour()
+
+	wnd.Run(uiLoop)
 }
